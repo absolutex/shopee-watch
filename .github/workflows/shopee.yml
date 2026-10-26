@@ -1,0 +1,53 @@
+name: shopee-stock
+
+on:
+  schedule:
+    - cron: '*/10 * * * *'      # every ~10 min (GitHub may start a few minutes late)
+  workflow_dispatch:
+    inputs:
+      test:
+        description: 'Send a test alert (opens a test issue)'
+        type: boolean
+        default: false
+
+permissions:
+  issues: write
+  contents: read
+
+jobs:
+  check:
+    runs-on: ubuntu-latest
+    timeout-minutes: 8
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+      - run: npm i --no-save playwright@1.48.2
+      - run: npx playwright install --with-deps chromium
+
+      - id: check
+        run: node check.mjs
+        env:
+          FORCE_TEST: ${{ inputs.test }}
+
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: screenshot
+          path: shot.png
+          retention-days: 3
+
+      - name: Alert via GitHub issue (once until you close it)
+        if: steps.check.outputs.status == 'in_stock'
+        env:
+          GH_TOKEN: ${{ github.token }}
+          NOTE: ${{ steps.check.outputs.note }}
+        run: |
+          gh label create in-stock --color d73a4a 2>/dev/null || true
+          open=$(gh issue list --label in-stock --state open --json number -q '.[].number')
+          if [ -z "$open" ]; then
+            gh issue create --label in-stock \
+              --title "Shopee: iPhone Duo Star White 512GB อาจมีของแล้ว — ไปดูเลย!" \
+              --body "$(printf 'เปิดหน้าสินค้า: https://shopee.co.th/product/989284521/45567695488\n\nรายละเอียด: %s\n\nเช็กเมื่อ: %s\n\nปิด issue นี้เมื่อดูแล้ว ระบบจะเตือนใหม่ได้อีกครั้ง' "$NOTE" "$(TZ=Asia/Bangkok date '+%Y-%m-%d %H:%M')")"
+          fi
