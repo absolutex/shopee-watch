@@ -13,18 +13,34 @@ function out(k, v) {
 }
 
 const browser = await chromium.launch();
-const page = await browser.newPage({
+const context = await browser.newContext({
   locale: 'th-TH',
   timezoneId: 'Asia/Bangkok',
   viewport: { width: 1366, height: 900 },
   userAgent: 'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/130.0.0.0 Safari/537.36',
 });
+// Pre-set the language so Shopee skips its first-visit "เลือกภาษา" page
+await context.addCookies([{ name: 'language', value: 'th', domain: '.shopee.co.th', path: '/' }]);
+const page = await context.newPage();
 
 let status = 'unknown';
 let note = '';
 try {
   await page.goto(URL, { waitUntil: 'domcontentloaded', timeout: 60000 });
+  await page.waitForTimeout(6000);
+
+  // If the language picker still shows, choose ไทย and reload the product page
+  const thai = page.getByRole('button', { name: 'ไทย' }).or(page.getByText('ไทย', { exact: true })).first();
+  if (await thai.count()) {
+    console.log('language picker shown -> clicking ไทย');
+    await thai.click({ timeout: 5000 }).catch(() => {});
+    await page.waitForTimeout(3000);
+    if (!page.url().includes('45567695488')) {
+      await page.goto(URL, { waitUntil: 'domcontentloaded', timeout: 60000 });
+    }
+  }
   await page.waitForTimeout(12000);                       // let Shopee's JS load price/stock
+  console.log('final url: ' + page.url());
 
   const text = await page.locator('body').innerText();
   const hasProduct = text.includes('iPhone Duo');
